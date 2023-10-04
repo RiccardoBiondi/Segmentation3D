@@ -220,7 +220,16 @@ def predict_array_patches(
 
     model = model.eval()
 
-    arr, pad_values = pad_3d_array(arr, patch_size, strides, padding, return_pad=True)
+    ref_array = arr
+    if arr.ndim == 4:
+        # in this case the image is multichannel. 
+        # Since I am working with torch, I will assume that the format is 
+        # channels last. 
+        # Now I wil extract the 3D image array (single channel), which will be used to 
+        # # estimate the paddings and apply the padding values to each image channel
+        ref_array = arr[0]
+
+    ref_array, pad_values = pad_3d_array(ref_array, patch_size, strides, padding, return_pad=True)
 
     if unpad and padding == "valid":
         Warning(
@@ -229,27 +238,36 @@ def predict_array_patches(
         unpad = False
 
     coords_top_corner, coords_bottom_corner = get_patch_coords(
-        arr,
+        ref_array,
         patch_size,
         strides,
     )
 
     n_patches = coords_top_corner.shape[0]
 
-    arr_pred = np.zeros(arr.shape)
-    mask = np.zeros(arr.shape)
+    # I will assume a resulting segmentation as one channel image
+    arr_pred = np.zeros(ref_array.shape)
+    mask = np.zeros(ref_array.shape)
 
     for i in range(n_patches):
         top_corner = coords_top_corner[i]
         bottom_corner = coords_bottom_corner[i]
-
-        patch = arr[
+        if arr.ndim == 3:
+            patch = arr[
             top_corner[0] : bottom_corner[0],
             top_corner[1] : bottom_corner[1],
-            top_corner[2] : bottom_corner[2],
-        ]
+            top_corner[2] : bottom_corner[2]
+            ]
+        else:
+            patch = arr[:,
+                        top_corner[0] : bottom_corner[0],
+                        top_corner[1] : bottom_corner[1],
+                        top_corner[2] : bottom_corner[2]]
+        if arr.ndim == 3:
+            patch = torch.from_numpy(patch).unsqueeze(0).unsqueeze(0).float().to(device)
 
-        patch = torch.from_numpy(patch).unsqueeze(0).unsqueeze(0).float().to(device)
+        else:
+            patch = torch.from_numpy(patch).unsqueeze(0).float().to(device)
 
         patch_pred = model(patch)
 
@@ -258,13 +276,13 @@ def predict_array_patches(
         arr_pred[
             top_corner[0] : bottom_corner[0],
             top_corner[1] : bottom_corner[1],
-            top_corner[2] : bottom_corner[2],
+            top_corner[2] : bottom_corner[2]
         ] += patch_pred
 
         mask[
             top_corner[0] : bottom_corner[0],
             top_corner[1] : bottom_corner[1],
-            top_corner[2] : bottom_corner[2],
+            top_corner[2] : bottom_corner[2]
         ] += 1
 
     arr_pred = arr_pred / mask
